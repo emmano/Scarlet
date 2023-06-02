@@ -20,6 +20,7 @@ import com.tinder.scarlet.retry.ExponentialBackoffStrategy
 import com.tinder.scarlet.streamadapter.builtin.BuiltInStreamAdapterFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
@@ -156,7 +157,7 @@ class Scarlet internal constructor(
         private val messageAdapterFactories = mutableListOf<MessageAdapter.Factory>()
         private val streamAdapterFactories = mutableListOf<StreamAdapter.Factory>()
         private val platform = RuntimePlatform.get()
-        private val scope = CoroutineScope(Dispatchers.IO)
+        private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
         fun webSocketFactory(factory: WebSocket.Factory): Builder = apply { webSocketFactory = factory }
 

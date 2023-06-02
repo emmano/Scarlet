@@ -7,8 +7,8 @@ dependencies {
     api libs.okHttp
 
     implementation project(':scarlet-core-internal')
-    implementation libs.rxJava
     implementation libs.kotlin.stdlib
+    implementation libs.kotlinx.coroutines.core
 
     testImplementation project(':scarlet')
     testImplementation project(':scarlet-websocket-mockwebserver')

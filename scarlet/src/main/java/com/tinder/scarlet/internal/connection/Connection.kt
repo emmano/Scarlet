@@ -31,6 +31,7 @@ import com.tinder.StateMachine.Transition.Valid
 import com.tinder.scarlet.Stream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.FlowCollector
@@ -72,7 +73,7 @@ internal class Connection(
             get() = stateMachine.state
 
         private val lifecycleStateSubscriber = LifecycleStateSubscriber(this)
-        private val eventProcessor = MutableSharedFlow<Event>(replay = 1)
+        private val eventProcessor = MutableSharedFlow<Event>(replay = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
         private val stateMachine = StateMachine.create<State, Event, SideEffect> {
             state<Disconnected> {
                 onEnter {

@@ -8,7 +8,9 @@ import com.tinder.scarlet.Message
 import com.tinder.scarlet.ShutdownReason
 import com.tinder.scarlet.Stream
 import com.tinder.scarlet.WebSocket
-import com.tinder.scarlet.utils.toStream
+import com.tinder.scarlet.utils.stream
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.onStart
 import okhttp3.WebSocketListener
 import okio.ByteString.Companion.toByteString
 
@@ -19,11 +21,12 @@ class OkHttpWebSocket internal constructor(
 ) : WebSocket {
 
     override fun open(): Stream<WebSocket.Event> = okHttpWebSocketEventObserver.observe()
-        .doOnSubscribe {
+        .onStart {
             connectionEstablisher.establishConnection(okHttpWebSocketEventObserver)
+        }.onEach {
+            handleWebSocketEvent(it)
         }
-        .doOnNext(this::handleWebSocketEvent)
-        .toStream()
+        .stream()
 
     @Synchronized
     override fun send(message: Message): Boolean = when (message) {

@@ -9,9 +9,7 @@ import com.tinder.scarlet.StreamAdapter
 import com.tinder.scarlet.internal.connection.Connection
 import com.tinder.scarlet.utils.hasUnresolvableType
 import com.tinder.scarlet.utils.stream
-import com.tinder.scarlet.utils.toStream
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.flatMapConcat
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import java.lang.reflect.Method

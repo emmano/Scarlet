@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
 import org.reactivestreams.Subscriber
 import org.reactivestreams.Subscription
+import java.util.concurrent.CancellationException
 import kotlin.coroutines.CoroutineContext
 
 /**
@@ -25,10 +26,10 @@ import kotlin.coroutines.CoroutineContext
  */
 
 fun <T> MutableSharedFlow<T>.subscriber(scope: CoroutineScope) =
-    LifecycleRegistry.ReactiveSubscriber<T>(
-        capacity = 40,
-        onBufferOverflow = BufferOverflow.SUSPEND,
-        requestSize = 1
+    LifecycleRegistry.ReactiveSubscriber(
+        this,
+        requestSize = 1,
+        scope = scope
     )
 
 class LifecycleRegistry internal constructor(
@@ -42,34 +43,34 @@ class LifecycleRegistry internal constructor(
 
     @Suppress("ReactiveStreamsSubscriberImplementation")
     class ReactiveSubscriber<T>(
-        capacity: Int,
-        onBufferOverflow: BufferOverflow,
+        private val mutableSharedFlow: MutableSharedFlow<T>,
+        private val scope: CoroutineScope,
         private val requestSize: Long
     ) : Subscriber<T> {
         private lateinit var subscription: Subscription
 
         // This implementation of ReactiveSubscriber always uses "offer" in its onNext implementation and it cannot
         // be reliable with rendezvous channel, so a rendezvous channel is replaced with buffer=1 channel
-        private val channel =
-            Channel<T>(if (capacity == Channel.RENDEZVOUS) 1 else capacity, onBufferOverflow)
+//        private val channel =
+//            Channel<T>(if (capacity == Channel.RENDEZVOUS) 1 else capacity, onBufferOverflow)
 
-        suspend fun takeNextOrNull(): T? {
-            val result = channel.receiveCatching()
-            result.exceptionOrNull()?.let { throw it }
-            return result.getOrElse { null } // Closed channel
-        }
+//        suspend fun takeNextOrNull(): T? {
+//            val result = channel.receiveCatching()
+//            result.exceptionOrNull()?.let { throw it }
+//            return result.getOrElse { null } // Closed channel
+//        }
 
         override fun onNext(value: T) {
             // Controlled by requestSize
-            require(channel.trySend(value).isSuccess) { "Element $value was not added to channel because it was full, $channel" }
+            require(mutableSharedFlow.tryEmit(value)) { "Element $value was not added to channel because it was full, $mutableSharedFlow" }
         }
 
         override fun onComplete() {
-            channel.close()
+            scope.cancel()
         }
 
         override fun onError(t: Throwable?) {
-            channel.close(t)
+            scope.cancel()
         }
 
         override fun onSubscribe(s: Subscription) {
@@ -92,8 +93,8 @@ class LifecycleRegistry internal constructor(
         dispatcher: CoroutineContext,
         scope: CoroutineScope
     ) : this(
-        MutableSharedFlow(1),
-        MutableSharedFlow(1),
+        MutableSharedFlow(replay = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST),
+        MutableSharedFlow(replay = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST),
         throttleTimeoutMillis,
         dispatcher,
         scope

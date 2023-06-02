@@ -6,6 +6,8 @@ package com.tinder.scarlet.utils
 
 import com.tinder.scarlet.Stream
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -20,7 +22,7 @@ import kotlinx.coroutines.reactive.asPublisher
 class FlowStream<T : Any>(
     private val flow: Flow<T>,
     private val scope: CoroutineScope
-) : Stream<T>, Publisher<T> by flow.asPublisher() {
+) : Stream<T>, Publisher<T> by flow.asPublisher(SupervisorJob()) {
 
     override fun start(observer: Stream.Observer<T>): Stream.Disposable {
         flow
@@ -45,4 +47,5 @@ private class FlowDisposable(private val scope: CoroutineScope) : Stream.Disposa
 
 }
 
-fun <T : Any> Flow<T>.stream(scope: CoroutineScope) = FlowStream(this, scope) as Stream<T>
+fun <T : Any> Flow<T>.stream(scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)) =
+    FlowStream(this, scope) as Stream<T>

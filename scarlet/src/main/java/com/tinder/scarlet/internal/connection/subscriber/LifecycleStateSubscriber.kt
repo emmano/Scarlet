@@ -15,6 +15,8 @@ internal class LifecycleStateSubscriber(
     private val stateManager: Connection.StateManager
 ) : Subscriber<Lifecycle.State> {
     private val pendingRequestCount = AtomicInteger()
+
+    lateinit var subscription: Subscription
     override fun onNext(lifecycleState: Lifecycle.State) {
         val value = pendingRequestCount.decrementAndGet()
         if (value < 0) {
@@ -24,8 +26,9 @@ internal class LifecycleStateSubscriber(
     }
 
     override fun onComplete() = stateManager.handleEvent(Event.OnLifecycle.Terminate)
-    override fun onSubscribe(s: Subscription?) {
-        s?.request(1)
+    override fun onSubscribe(s: Subscription) {
+        s.request(1)
+        this.subscription = s
     }
 
     override fun onError(throwable: Throwable) = throw throwable
@@ -33,16 +36,8 @@ internal class LifecycleStateSubscriber(
     fun requestNext() {
         if (pendingRequestCount.get() == 0) {
             pendingRequestCount.incrementAndGet()
-//            request(1)
+            subscription.request(1)
         }
 
     }
-
-//    override suspend fun emit(value: Lifecycle.State) {
-//        val value = pendingRequestCount.decrementAndGet()
-//        if (value < 0) {
-//            pendingRequestCount.set(0)
-//        }
-//        stateManager.handleEvent(Event.OnLifecycle.StateChange(value))
-//    }
 }

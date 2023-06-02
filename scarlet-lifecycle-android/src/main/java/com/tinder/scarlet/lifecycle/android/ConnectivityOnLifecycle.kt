@@ -13,11 +13,12 @@ import com.tinder.scarlet.Lifecycle
 import com.tinder.scarlet.lifecycle.LifecycleRegistry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 internal class ConnectivityOnLifecycle(
     applicationContext: Context,
     private val lifecycleRegistry: LifecycleRegistry = LifecycleRegistry(scope = CoroutineScope(
-        Dispatchers.Main)
+        SupervisorJob() + Dispatchers.Main)
     )
 ) : Lifecycle by lifecycleRegistry {
 

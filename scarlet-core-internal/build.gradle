@@ -5,7 +5,6 @@ apply plugin: 'java-library'
 dependencies {
     api project(':scarlet-core')
 
-    implementation libs.rxJava
     implementation libs.kotlin.stdlib
     implementation libs.kotlinx.coroutines.core
     implementation libs.kotlinx.coroutines.reactive

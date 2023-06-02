@@ -5,6 +5,7 @@
 package com.tinder.scarlet.lifecycle
 
 import com.tinder.scarlet.Lifecycle
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
@@ -16,7 +17,7 @@ import kotlin.coroutines.CoroutineContext
 internal class FlowableLifecycle(
     private val flow: Flow<Lifecycle.State>,
     private val dispatcher: CoroutineContext
-) : Lifecycle, Publisher<Lifecycle.State> by flow.asPublisher() {
+) : Lifecycle, Publisher<Lifecycle.State> by flow.asPublisher(SupervisorJob()) {
 
     override fun combineWith(vararg others: Lifecycle): Lifecycle {
         val lifecycles = listOf<Lifecycle>(this) + others

@@ -22,8 +22,6 @@ android {
 
 dependencies {
     implementation project(':scarlet')
-    implementation libs.rxJava
-    implementation libs.rxKotlin
     implementation libs.appCompat
     implementation libs.kotlin.stdlib
 
