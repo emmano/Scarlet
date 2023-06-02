@@ -8,12 +8,16 @@ import com.tinder.scarlet.MessageAdapter
 import com.tinder.scarlet.StreamAdapter
 import com.tinder.scarlet.internal.connection.Connection
 import com.tinder.scarlet.utils.hasUnresolvableType
+import com.tinder.scarlet.utils.stream
 import com.tinder.scarlet.utils.toStream
-import io.reactivex.Flowable
-import io.reactivex.Scheduler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.flatMapConcat
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import java.lang.reflect.Method
 import java.lang.reflect.ParameterizedType
 import java.lang.reflect.Type
+import kotlin.coroutines.CoroutineContext
 
 internal sealed class ServiceMethod {
 
@@ -51,22 +55,25 @@ internal sealed class ServiceMethod {
     class Receive(
         internal val eventMapper: EventMapper<*>,
         private val connection: Connection,
-        private val scheduler: Scheduler,
-        private val streamAdapter: StreamAdapter<Any, Any>
+        private val dispatcher: CoroutineContext,
+        private val streamAdapter: StreamAdapter<Any, Any>,
+        private val scope: CoroutineScope
     ) : ServiceMethod() {
 
         fun execute(): Any {
-            val stream = Flowable.defer { connection.observeEvent() }
-                .observeOn(scheduler)
-                .flatMapMaybe(eventMapper::mapToData)
-                .toStream()
+            val stream =
+                    connection.observeEvent()
+                        .flowOn(dispatcher)
+                        .map { eventMapper.mapToData(it) }
+                        .stream(scope)
             return streamAdapter.adapt(stream)
         }
 
         class Factory(
-            private val scheduler: Scheduler,
+            private val dispatcher: CoroutineContext,
             private val eventMapperFactory: EventMapper.Factory,
-            private val streamAdapterResolver: StreamAdapterResolver
+            private val streamAdapterResolver: StreamAdapterResolver,
+            private val scope: CoroutineScope
         ) : ServiceMethod.Factory {
             override fun create(connection: Connection, method: Method): Receive {
                 method.requireParameterTypes { "Receive method must have zero parameter: $method" }
@@ -79,7 +86,7 @@ internal sealed class ServiceMethod {
 
                 val eventMapper = createEventMapper(method)
                 val streamAdapter = createStreamAdapter(method)
-                return Receive(eventMapper, connection, scheduler, streamAdapter)
+                return Receive(eventMapper, connection, dispatcher, streamAdapter, scope)
             }
 
             private fun createEventMapper(method: Method): EventMapper<*> =

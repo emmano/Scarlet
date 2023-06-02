@@ -11,10 +11,14 @@ import android.content.IntentFilter
 import android.net.ConnectivityManager
 import com.tinder.scarlet.Lifecycle
 import com.tinder.scarlet.lifecycle.LifecycleRegistry
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 
 internal class ConnectivityOnLifecycle(
     applicationContext: Context,
-    private val lifecycleRegistry: LifecycleRegistry = LifecycleRegistry()
+    private val lifecycleRegistry: LifecycleRegistry = LifecycleRegistry(scope = CoroutineScope(
+        Dispatchers.Main)
+    )
 ) : Lifecycle by lifecycleRegistry {
 
     init {

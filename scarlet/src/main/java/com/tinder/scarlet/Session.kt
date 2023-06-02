@@ -4,6 +4,6 @@
 
 package com.tinder.scarlet
 
-import io.reactivex.disposables.Disposable
 
-internal data class Session(val webSocket: WebSocket, val webSocketDisposable: Disposable)
+
+internal data class Session(val webSocket: WebSocket, val webSocketDisposable: Stream.Disposable)

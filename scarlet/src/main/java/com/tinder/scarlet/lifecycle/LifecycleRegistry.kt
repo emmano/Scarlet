@@ -5,76 +5,160 @@
 package com.tinder.scarlet.lifecycle
 
 import com.tinder.scarlet.Lifecycle
-import io.reactivex.Scheduler
-import io.reactivex.processors.BehaviorProcessor
-import io.reactivex.processors.FlowableProcessor
-import io.reactivex.processors.PublishProcessor
-import io.reactivex.schedulers.Schedulers
-import io.reactivex.subscribers.DisposableSubscriber
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.getOrElse
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.onEach
 import org.reactivestreams.Subscriber
-import java.util.concurrent.TimeUnit
+import org.reactivestreams.Subscription
+import kotlin.coroutines.CoroutineContext
 
 /**
  * Used to trigger the start and stop of a WebSocket connection.
  */
-class LifecycleRegistry internal constructor(
-    private val upstreamProcessor: FlowableProcessor<Lifecycle.State>,
-    private val downstreamProcessor: FlowableProcessor<Lifecycle.State>,
-    throttleDurationMillis: Long,
-    throttleScheduler: Scheduler
-) : Lifecycle by FlowableLifecycle(downstreamProcessor.onBackpressureLatest(), throttleScheduler),
-    Subscriber<Lifecycle.State> by upstreamProcessor {
 
-    internal constructor(throttleTimeoutMillis: Long = 0, scheduler: Scheduler) : this(
-        PublishProcessor.create(),
-        BehaviorProcessor.create(),
-        throttleTimeoutMillis,
-        scheduler
+fun <T> MutableSharedFlow<T>.subscriber(scope: CoroutineScope) =
+    LifecycleRegistry.ReactiveSubscriber<T>(
+        capacity = 40,
+        onBufferOverflow = BufferOverflow.SUSPEND,
+        requestSize = 1
     )
 
-    constructor(throttleDurationMillis: Long = 0) : this(
+class LifecycleRegistry internal constructor(
+    private val upstreamProcessor: MutableSharedFlow<Lifecycle.State>,
+    private val downstreamProcessor: MutableSharedFlow<Lifecycle.State>,
+    throttleDurationMillis: Long,
+    throttleDispatcher: CoroutineContext,
+    scope: CoroutineScope
+) : Lifecycle by FlowableLifecycle(downstreamProcessor, throttleDispatcher),
+    Subscriber<Lifecycle.State> by upstreamProcessor.subscriber(scope) {
+
+    @Suppress("ReactiveStreamsSubscriberImplementation")
+    class ReactiveSubscriber<T>(
+        capacity: Int,
+        onBufferOverflow: BufferOverflow,
+        private val requestSize: Long
+    ) : Subscriber<T> {
+        private lateinit var subscription: Subscription
+
+        // This implementation of ReactiveSubscriber always uses "offer" in its onNext implementation and it cannot
+        // be reliable with rendezvous channel, so a rendezvous channel is replaced with buffer=1 channel
+        private val channel =
+            Channel<T>(if (capacity == Channel.RENDEZVOUS) 1 else capacity, onBufferOverflow)
+
+        suspend fun takeNextOrNull(): T? {
+            val result = channel.receiveCatching()
+            result.exceptionOrNull()?.let { throw it }
+            return result.getOrElse { null } // Closed channel
+        }
+
+        override fun onNext(value: T) {
+            // Controlled by requestSize
+            require(channel.trySend(value).isSuccess) { "Element $value was not added to channel because it was full, $channel" }
+        }
+
+        override fun onComplete() {
+            channel.close()
+        }
+
+        override fun onError(t: Throwable?) {
+            channel.close(t)
+        }
+
+        override fun onSubscribe(s: Subscription) {
+            subscription = s
+            makeRequest()
+        }
+
+        fun makeRequest() {
+            subscription.request(requestSize)
+        }
+
+        fun cancel() {
+            subscription.cancel()
+        }
+    }
+
+
+    internal constructor (
+        throttleTimeoutMillis: Long = 0,
+        dispatcher: CoroutineContext,
+        scope: CoroutineScope
+    ) : this(
+        MutableSharedFlow(1),
+        MutableSharedFlow(1),
+        throttleTimeoutMillis,
+        dispatcher,
+        scope
+    )
+
+    constructor(throttleDurationMillis: Long = 0, scope: CoroutineScope) : this(
         throttleDurationMillis,
-        Schedulers.computation()
+        Dispatchers.Unconfined,
+        scope
     )
 
     init {
         upstreamProcessor
-            .onBackpressureLatest()
             .distinctUntilChanged(Lifecycle.State::isEquivalentTo)
-            .compose {
-                if (throttleDurationMillis != 0L) {
-                    it.throttleWithTimeout(throttleDurationMillis, TimeUnit.MILLISECONDS, throttleScheduler)
-                } else {
-                    it
+            .onEach {
+                downstreamProcessor.tryEmit(it)
+                if (it == Lifecycle.State.Destroyed) {
+                    scope.cancel()
                 }
+            }.onCompletion {
+                upstreamProcessor.tryEmit(Lifecycle.State.Destroyed)
+
             }
-            .distinctUntilChanged(Lifecycle.State::isEquivalentTo)
-            .subscribe(LifecycleStateSubscriber())
+            .catch {
+                upstreamProcessor.tryEmit(Lifecycle.State.Destroyed)
+            }
+
+//            .compose {
+//                if (throttleDurationMillis != 0L) {
+//                    it.throttleWithTimeout(
+//                        throttleDurationMillis,
+//                        TimeUnit.MILLISECONDS,
+//                        throttleDispatcher
+//                    )
+//                } else {
+//                    it
+//                }
+//            }
+//            .distinctUntilChanged(Lifecycle.State::isEquivalentTo)
+//            .subscribe(LifecycleStateSubscriber())
     }
 
     override fun onComplete() {
-        upstreamProcessor.onNext(Lifecycle.State.Destroyed)
+        upstreamProcessor.tryEmit(Lifecycle.State.Destroyed)
     }
 
     override fun onError(t: Throwable?) {
-        upstreamProcessor.onNext(Lifecycle.State.Destroyed)
+        upstreamProcessor.tryEmit(Lifecycle.State.Destroyed)
     }
 
-    private inner class LifecycleStateSubscriber : DisposableSubscriber<Lifecycle.State>() {
-        override fun onNext(state: Lifecycle.State) {
-            downstreamProcessor.onNext(state)
-            if (state == Lifecycle.State.Destroyed) {
-                downstreamProcessor.onComplete()
-                dispose()
-            }
-        }
-
-        override fun onError(throwable: Throwable) {
-            throw IllegalStateException("Stream is terminated", throwable)
-        }
-
-        override fun onComplete() {
-            throw IllegalStateException("Stream is terminated")
-        }
-    }
+//    private inner class LifecycleStateSubscriber : DisposableSubscriber<Lifecycle.State>() {
+//        override fun onNext(state: Lifecycle.State) {
+//            downstreamProcessor.tryEmit(state)
+//            if (state == Lifecycle.State.Destroyed) {
+//                downstreamProcessor.cancel()
+//                dispose()
+//            }
+//        }
+//
+//        override fun onError(throwable: Throwable) {
+//            throw IllegalStateException("Stream is terminated", throwable)
+//        }
+//
+//        override fun onComplete() {
+//            throw IllegalStateException("Stream is terminated")
+//        }
+//    }
 }

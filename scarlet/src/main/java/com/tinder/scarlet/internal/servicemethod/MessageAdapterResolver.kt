@@ -5,7 +5,6 @@
 package com.tinder.scarlet.internal.servicemethod
 
 import com.tinder.scarlet.MessageAdapter
-import io.reactivex.exceptions.CompositeException
 import java.lang.reflect.Type
 import java.util.Arrays
 
@@ -36,10 +35,8 @@ internal class MessageAdapterResolver(
                 throwables.add(e)
             }
         }
-        val compositeException = CompositeException(*throwables.toTypedArray())
         throw IllegalStateException(
             "Cannot resolve message adapter for type: $type, annotations: $annotations.",
-            compositeException
         )
     }
 

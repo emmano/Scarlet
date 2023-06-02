@@ -18,7 +18,8 @@ import com.tinder.scarlet.messageadapter.builtin.BuiltInMessageAdapterFactory
 import com.tinder.scarlet.retry.BackoffStrategy
 import com.tinder.scarlet.retry.ExponentialBackoffStrategy
 import com.tinder.scarlet.streamadapter.builtin.BuiltInStreamAdapterFactory
-import io.reactivex.schedulers.Schedulers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
@@ -155,6 +156,7 @@ class Scarlet internal constructor(
         private val messageAdapterFactories = mutableListOf<MessageAdapter.Factory>()
         private val streamAdapterFactories = mutableListOf<StreamAdapter.Factory>()
         private val platform = RuntimePlatform.get()
+        private val scope = CoroutineScope(Dispatchers.IO)
 
         fun webSocketFactory(factory: WebSocket.Factory): Builder = apply { webSocketFactory = factory }
 
@@ -190,7 +192,7 @@ class Scarlet internal constructor(
         )
 
         private fun createConnectionFactory(): Connection.Factory =
-            Connection.Factory(lifecycle, checkNotNull(webSocketFactory), backoffStrategy, DEFAULT_SCHEDULER)
+            Connection.Factory(lifecycle, checkNotNull(webSocketFactory), backoffStrategy, DEFAULT_DISPATCHER, scope)
 
         private fun createServiceMethodExecutorFactory(): ServiceMethodExecutor.Factory {
             val messageAdapterResolver = createMessageAdapterResolver()
@@ -198,7 +200,7 @@ class Scarlet internal constructor(
             val eventMapperFactory = EventMapper.Factory(messageAdapterResolver)
             val sendServiceMethodFactory = ServiceMethod.Send.Factory(messageAdapterResolver)
             val receiveServiceMethodFactory = ServiceMethod.Receive.Factory(
-                DEFAULT_SCHEDULER, eventMapperFactory, streamAdapterResolver
+                DEFAULT_DISPATCHER, eventMapperFactory, streamAdapterResolver, scope
             )
             return ServiceMethodExecutor.Factory(platform, sendServiceMethodFactory, receiveServiceMethodFactory)
         }
@@ -215,7 +217,7 @@ class Scarlet internal constructor(
             private val RETRY_MAX_DURATION = 10000L
             private val DEFAULT_RETRY_STRATEGY =
                 ExponentialBackoffStrategy(RETRY_BASE_DURATION, RETRY_MAX_DURATION)
-            private val DEFAULT_SCHEDULER = Schedulers.computation() // TODO same thread option for debugging
+            private val DEFAULT_DISPATCHER = Dispatchers.Unconfined // TODO same thread option for debugging
         }
     }
 }

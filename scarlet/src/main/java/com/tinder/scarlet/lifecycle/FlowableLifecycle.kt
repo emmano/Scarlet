@@ -5,25 +5,29 @@
 package com.tinder.scarlet.lifecycle
 
 import com.tinder.scarlet.Lifecycle
-import io.reactivex.Flowable
-import io.reactivex.Scheduler
-import io.reactivex.schedulers.Timed
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.reactive.asFlow
+import kotlinx.coroutines.reactive.asPublisher
 import org.reactivestreams.Publisher
+import kotlin.coroutines.CoroutineContext
 
 internal class FlowableLifecycle(
-    private val flowable: Flowable<Lifecycle.State>,
-    private val scheduler: Scheduler
-) : Lifecycle, Publisher<Lifecycle.State> by flowable {
+    private val flow: Flow<Lifecycle.State>,
+    private val dispatcher: CoroutineContext
+) : Lifecycle, Publisher<Lifecycle.State> by flow.asPublisher() {
 
     override fun combineWith(vararg others: Lifecycle): Lifecycle {
         val lifecycles = listOf<Lifecycle>(this) + others
-        val timedLifecycleStateFlowables = lifecycles.map {
-            Flowable.fromPublisher<Lifecycle.State>(it)
-                .timestamp(scheduler)
+        val timedLifecycleStateFlows = lifecycles.map {
+            it.asFlow()
         }
-        @Suppress("UNCHECKED_CAST")
-        val flowable = Flowable.combineLatest(timedLifecycleStateFlowables, { it.map { it as Timed<Lifecycle.State> } })
-            .map(List<Timed<Lifecycle.State>>::combine)
-        return FlowableLifecycle(flowable, scheduler)
+
+        val flow = combine(timedLifecycleStateFlows) {
+            it.toList().combine()
+        }.flowOn(dispatcher)
+
+        return FlowableLifecycle(flow, dispatcher)
     }
 }

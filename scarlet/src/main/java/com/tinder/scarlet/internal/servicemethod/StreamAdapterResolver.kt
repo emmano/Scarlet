@@ -5,7 +5,6 @@
 package com.tinder.scarlet.internal.servicemethod
 
 import com.tinder.scarlet.StreamAdapter
-import io.reactivex.exceptions.CompositeException
 import java.lang.reflect.Type
 
 internal class StreamAdapterResolver(
@@ -22,7 +21,6 @@ internal class StreamAdapterResolver(
                 throwables.add(e)
             }
         }
-        val compositeException = CompositeException(*throwables.toTypedArray())
-        throw IllegalStateException("Cannot resolve stream adapter for type $type.", compositeException)
+        throw IllegalStateException("Cannot resolve stream adapter for type $type.")
     }
 }

@@ -5,20 +5,16 @@
 package com.tinder.scarlet.lifecycle
 
 import com.tinder.scarlet.Lifecycle
-import io.reactivex.schedulers.Timed
 
-internal fun List<Timed<Lifecycle.State>>.combine(): Lifecycle.State {
-    val shouldStopAndAbort = any { it.value().isStoppedAndAborted() }
+internal fun List<Lifecycle.State>.combine(): Lifecycle.State {
+    val shouldStopAndAbort = any { it.isStoppedAndAborted() }
     if (shouldStopAndAbort) {
         return Lifecycle.State.Stopped.AndAborted
     }
 
-    val shouldStop = any { it.value().isStopped() }
+    val shouldStop = any { it.isStopped() }
     if (shouldStop) {
-        return filter { it.value().isStopped() }
-            .sortedBy { it.time() }
-            .first()
-            .value()
+        return first { it.isStopped() }
     }
 
     return Lifecycle.State.Started

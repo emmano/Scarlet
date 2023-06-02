@@ -8,6 +8,8 @@ import android.app.Application
 import androidx.lifecycle.LifecycleOwner
 import com.tinder.scarlet.Lifecycle
 import com.tinder.scarlet.lifecycle.LifecycleRegistry
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 
 object AndroidLifecycle {
     private const val APPLICATION_THROTTLE_TIMEOUT_MILLIS = 1000L
@@ -19,7 +21,10 @@ object AndroidLifecycle {
         application: Application,
         throttleTimeoutMillis: Long = APPLICATION_THROTTLE_TIMEOUT_MILLIS
     ): Lifecycle =
-        ApplicationResumedLifecycle(application, LifecycleRegistry(throttleTimeoutMillis))
+        ApplicationResumedLifecycle(
+            application,
+            LifecycleRegistry(throttleTimeoutMillis, scope = CoroutineScope(Dispatchers.Main))
+        )
             .combineWith(ConnectivityOnLifecycle(application))
 
     @JvmStatic
@@ -29,7 +34,7 @@ object AndroidLifecycle {
         lifecycleOwner: LifecycleOwner,
         throttleTimeoutMillis: Long = ACTIVITY_THROTTLE_TIMEOUT_MILLIS
     ): Lifecycle =
-        LifecycleOwnerResumedLifecycle(lifecycleOwner, LifecycleRegistry(throttleTimeoutMillis))
+        LifecycleOwnerResumedLifecycle(lifecycleOwner, LifecycleRegistry(throttleTimeoutMillis, scope = CoroutineScope(Dispatchers.Main)))
             .combineWith(ConnectivityOnLifecycle(application))
 
     @JvmStatic
@@ -39,6 +44,6 @@ object AndroidLifecycle {
         lifecycleOwner: LifecycleOwner,
         throttleTimeoutMillis: Long = ACTIVITY_THROTTLE_TIMEOUT_MILLIS
     ): Lifecycle =
-        ServiceStartedLifecycle(lifecycleOwner, LifecycleRegistry(throttleTimeoutMillis))
+        ServiceStartedLifecycle(lifecycleOwner, LifecycleRegistry(throttleTimeoutMillis, scope = CoroutineScope(Dispatchers.Main)))
             .combineWith(ConnectivityOnLifecycle(application))
 }

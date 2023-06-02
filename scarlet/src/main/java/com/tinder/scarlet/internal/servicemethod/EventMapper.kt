@@ -13,43 +13,44 @@ import com.tinder.scarlet.State
 import com.tinder.scarlet.WebSocket
 import com.tinder.scarlet.utils.getParameterUpperBound
 import com.tinder.scarlet.utils.getRawType
-import io.reactivex.Maybe
 import java.lang.reflect.ParameterizedType
 import java.lang.reflect.Type
 
 internal sealed class EventMapper<T : Any> {
 
-    abstract fun mapToData(event: Event): Maybe<T>
+    abstract fun mapToData(event: Event): T
 
     object NoOp : EventMapper<Any>() {
-        override fun mapToData(event: Event): Maybe<Any> = Maybe.just(event)
+        override fun mapToData(event: Event): Any = event
     }
 
     class FilterEventType<E : Event>(private val clazz: Class<E>) : EventMapper<E>() {
-        override fun mapToData(event: Event): Maybe<E> = if (clazz.isInstance(event)) {
+        override fun mapToData(event: Event): E = if (clazz.isInstance(event)) {
             @Suppress("UNCHECKED_CAST")
-            Maybe.just(event as E)
+            event as E
         } else {
-            Maybe.empty()
+            throw IllegalStateException("EVENT NOT FROM SAME CLASS!!!")
         }
     }
 
     object ToLifecycleState : EventMapper<Lifecycle.State>() {
         private val filterEventType = FilterEventType(Event.OnLifecycle.StateChange::class.java)
 
-        override fun mapToData(event: Event): Maybe<Lifecycle.State> = filterEventType.mapToData(event).map { it.state }
+        override fun mapToData(event: Event): Lifecycle.State =
+            filterEventType.mapToData(event).state
     }
 
     object ToWebSocketEvent : EventMapper<WebSocket.Event>() {
         private val filterEventType = FilterEventType(Event.OnWebSocket.Event::class.java)
 
-        override fun mapToData(event: Event): Maybe<WebSocket.Event> = filterEventType.mapToData(event).map { it.event }
+        override fun mapToData(event: Event): WebSocket.Event =
+            filterEventType.mapToData(event).event
     }
 
     object ToState : EventMapper<State>() {
         private val filterEventType = FilterEventType(Event.OnStateChange::class.java)
 
-        override fun mapToData(event: Event): Maybe<State> = filterEventType.mapToData(event).map { it.state }
+        override fun mapToData(event: Event): State = filterEventType.mapToData(event).state
     }
 
     class ToDeserialization<T : Any>(
@@ -57,9 +58,9 @@ internal sealed class EventMapper<T : Any> {
     ) : EventMapper<Deserialization<T>>() {
         private val toWebSocketEvent = ToWebSocketEvent
 
-        override fun mapToData(event: Event): Maybe<Deserialization<T>> = toWebSocketEvent.mapToData(event)
-            .filter { it is WebSocket.Event.OnMessageReceived }
-            .map { (it as WebSocket.Event.OnMessageReceived).message.deserialize() }
+        override fun mapToData(event: Event): Deserialization<T> =
+            toWebSocketEvent.mapToData(event).run { this as WebSocket.Event.OnMessageReceived }
+                .run { message.deserialize() }
 
         private fun Message.deserialize(): Deserialization<T> = try {
             Deserialization.Success(messageAdapter.fromMessage(this))
@@ -71,16 +72,17 @@ internal sealed class EventMapper<T : Any> {
     class ToDeserializedValue<T : Any>(
         private val toDeserialization: ToDeserialization<T>
     ) : EventMapper<T>() {
-        override fun mapToData(event: Event): Maybe<T> = toDeserialization.mapToData(event)
-            .filter { it is Deserialization.Success }
-            .map { (it as Deserialization.Success).value }
+        override fun mapToData(event: Event): T = toDeserialization.mapToData(event)
+            .run { this as Deserialization.Success }
+            .run { value }
     }
 
     class Factory(
         private val messageAdapterResolver: MessageAdapterResolver
     ) {
 
-        private val toDeserializationCache = mutableMapOf<MessageAdapter<Any>, ToDeserialization<*>>()
+        private val toDeserializationCache =
+            mutableMapOf<MessageAdapter<Any>, ToDeserialization<*>>()
 
         fun create(returnType: ParameterizedType, annotations: Array<Annotation>): EventMapper<*> {
             val receivingClazz = returnType.getFirstTypeArgument().getRawType()

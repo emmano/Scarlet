@@ -9,8 +9,10 @@ dependencies {
     implementation project(':scarlet-message-adapter-builtin')
     implementation project(':scarlet-stream-adapter-builtin')
     implementation libs.stateMachine
-    implementation libs.rxJava
-    implementation libs.rxKotlin
+    api libs.kotlinx.coroutines.core
+    api libs.kotlinx.coroutines.reactive
+//    implementation libs.rxJava
+//    implementation libs.rxKotlin
     implementation libs.kotlin.stdlib
 
     testImplementation project(':scarlet-test-utils')

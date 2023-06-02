@@ -7,6 +7,8 @@ package com.tinder.app.echo.domain
 import com.tinder.app.echo.inject.EchoBotScope
 import com.tinder.scarlet.Lifecycle
 import com.tinder.scarlet.lifecycle.LifecycleRegistry
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import javax.inject.Inject
 
 @EchoBotScope
@@ -15,7 +17,9 @@ class LoggedInLifecycle constructor(
     private val lifecycleRegistry: LifecycleRegistry
 ) : Lifecycle by lifecycleRegistry {
 
-    @Inject constructor(authStatusRepository: AuthStatusRepository) : this(authStatusRepository, LifecycleRegistry())
+    @Inject constructor(authStatusRepository: AuthStatusRepository) : this(authStatusRepository, LifecycleRegistry(scope = CoroutineScope(
+        Dispatchers.Main)
+    ))
 
     init {
         authStatusRepository.observeAuthStatus()

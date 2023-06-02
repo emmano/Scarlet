@@ -28,11 +28,22 @@ import com.tinder.scarlet.lifecycle.LifecycleRegistry
 import com.tinder.scarlet.retry.BackoffStrategy
 import com.tinder.StateMachine.Matcher.Companion.any
 import com.tinder.StateMachine.Transition.Valid
-import io.reactivex.Flowable
-import io.reactivex.Scheduler
-import io.reactivex.disposables.Disposable
-import io.reactivex.processors.PublishProcessor
+import com.tinder.scarlet.Stream
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.FlowCollector
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.reactive.asFlow
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.CoroutineContext
 
 internal class Connection(
     val stateManager: StateManager
@@ -40,7 +51,7 @@ internal class Connection(
 
     fun startForever() = stateManager.subscribe()
 
-    fun observeEvent(): Flowable<Event> = stateManager.observeEvent()
+    fun observeEvent(): Flow<Event> = stateManager.observeEvent()
 
     fun send(message: Message): Boolean {
         val state = stateManager.state
@@ -54,13 +65,14 @@ internal class Connection(
         val lifecycle: Lifecycle,
         private val webSocketFactory: WebSocket.Factory,
         private val backoffStrategy: BackoffStrategy,
-        private val scheduler: Scheduler
+        private val dispatcher: CoroutineContext,
+        private val scope: CoroutineScope
     ) {
         val state: State
             get() = stateMachine.state
 
         private val lifecycleStateSubscriber = LifecycleStateSubscriber(this)
-        private val eventProcessor = PublishProcessor.create<Event>()
+        private val eventProcessor = MutableSharedFlow<Event>(replay = 1)
         private val stateMachine = StateMachine.create<State, Event, SideEffect> {
             state<Disconnected> {
                 onEnter {
@@ -85,7 +97,12 @@ internal class Connection(
                 }
                 on<OnRetry> {
                     val webSocketSession = open()
-                    transitionTo(Connecting(session = webSocketSession, retryCount = retryCount + 1))
+                    transitionTo(
+                        Connecting(
+                            session = webSocketSession,
+                            retryCount = retryCount + 1
+                        )
+                    )
                 }
                 on(lifecycleStart()) {
                     // No-op
@@ -107,7 +124,7 @@ internal class Connection(
                 }
                 on<OnWebSocket.Terminate>() {
                     val backoffDuration = backoffStrategy.backoffDurationMillisAt(retryCount)
-                    val timerDisposable = scheduleRetry(backoffDuration)
+                    val timerDisposable = scheduleRetry(backoffDuration, scope)
                     transitionTo(
                         WaitingToRetry(
                             timerDisposable = timerDisposable,
@@ -136,7 +153,7 @@ internal class Connection(
                 }
                 on<OnWebSocket.Terminate>() {
                     val backoffDuration = backoffStrategy.backoffDurationMillisAt(0)
-                    val timerDisposable = scheduleRetry(backoffDuration)
+                    val timerDisposable = scheduleRetry(backoffDuration, scope)
                     transitionTo(
                         WaitingToRetry(
                             timerDisposable = timerDisposable,
@@ -153,46 +170,72 @@ internal class Connection(
             }
             state<Destroyed> {
                 onEnter {
-                    lifecycleStateSubscriber.dispose()
+                    lifecycleStateSubscriber
                 }
             }
             initialState(Disconnected)
             onTransition { transition ->
                 transition.let {
                     if (it is Valid && it.fromState != it.toState) {
-                        eventProcessor.onNext(Event.OnStateChange(state))
+                        eventProcessor.tryEmit(Event.OnStateChange(state))
                     }
                 }
             }
         }
 
-        fun observeEvent(): Flowable<Event> = eventProcessor.onBackpressureBuffer()
+        class ScopeDisposable(private val coroutineScope: CoroutineScope) : Stream.Disposable {
+            override fun dispose() = coroutineScope.cancel()
+
+            override fun isDisposed() = coroutineScope.isActive
+
+        }
+
+        fun <T> CoroutineScope.disposable() = ScopeDisposable(this)
+
+        fun observeEvent(): Flow<Event> = eventProcessor
 
         fun subscribe() {
             lifecycle.subscribe(lifecycleStateSubscriber)
         }
 
         fun handleEvent(event: Event) {
-            eventProcessor.onNext(event)
+            eventProcessor.tryEmit(event)
             stateMachine.transition(event)
         }
 
         private fun open(): Session {
             val webSocket = webSocketFactory.create()
-            val subscriber = WebSocketEventSubscriber(this)
-            Flowable.fromPublisher(webSocket.open())
-                .observeOn(scheduler)
-                .cast(WebSocket.Event::class.java)
-                .subscribe(subscriber)
+            val subscriber = WebSocketEventSubscriber(this, scope)
+            webSocket.open()
+                .asFlow()
+                .flowOn(dispatcher)
             return Session(webSocket, subscriber)
         }
 
-        private fun scheduleRetry(duration: Long): Disposable {
-            val retryTimerScheduler = RetryTimerSubscriber(this)
-            Flowable.timer(duration, TimeUnit.MILLISECONDS, scheduler)
-                .onBackpressureBuffer()
-                .subscribe(retryTimerScheduler)
-            return retryTimerScheduler
+        class TickerDisposable(private val scope: CoroutineScope) : Stream.Disposable {
+            override fun dispose() {
+                scope.cancel()
+            }
+
+            override fun isDisposed() = scope.isActive
+
+        }
+
+        fun ticker(interval: Long) = flow {
+            delay(interval)
+            emit(Unit)
+        }
+
+        private fun scheduleRetry(duration: Long, scope: CoroutineScope): Stream.Disposable {
+            ticker(duration)
+                .onEach {
+                    handleEvent(OnRetry)
+                }
+                .buffer()
+                .flowOn(dispatcher)
+                .launchIn(scope)
+
+            return TickerDisposable(scope)
         }
 
         private fun requestNextLifecycleState() = lifecycleStateSubscriber.requestNext()
@@ -220,16 +263,18 @@ internal class Connection(
         private val lifecycle: Lifecycle,
         private val webSocketFactory: WebSocket.Factory,
         private val backoffStrategy: BackoffStrategy,
-        private val scheduler: Scheduler
+        private val dispatcher: CoroutineContext,
+        private val scope: CoroutineScope
     ) {
         private val sharedLifecycle: Lifecycle by lazy { createSharedLifecycle() }
 
         fun create(): Connection {
-            val stateManager = StateManager(sharedLifecycle, webSocketFactory, backoffStrategy, scheduler)
+            val stateManager =
+                StateManager(sharedLifecycle, webSocketFactory, backoffStrategy, dispatcher, scope)
             return Connection(stateManager)
         }
 
-        private fun createSharedLifecycle() = LifecycleRegistry()
+        private fun createSharedLifecycle() = LifecycleRegistry(scope = scope)
             .apply { lifecycle.subscribe(this) }
     }
 }
